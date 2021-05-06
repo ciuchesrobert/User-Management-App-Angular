@@ -5,11 +5,12 @@ import {User} from '../model/user';
 import {UserService} from '../service/user.service';
 import {NotificationService} from '../service/notification.service';
 import {NotificationType} from '../enum/notification-type.enum';
-import {HttpErrorResponse} from '@angular/common/http';
+import {HttpErrorResponse, HttpEvent, HttpEventType} from '@angular/common/http';
 import {NgForm} from '@angular/forms';
 
 import {Router} from '@angular/router';
 import {AuthenticationService} from '../service/authentication.service';
+import {FileUploadStatus} from '../model/file-upload.status';
 
 @Component({
   selector: 'app-user',
@@ -26,9 +27,9 @@ export class UserComponent implements OnInit {
   public fileName: string;
   public profileImage: File;
   private currentUsername: string;
+  public fileStatus = new FileUploadStatus();
   user: User;
   isAdmin: boolean;
-  fileStatus: any;
   editUser = new User();
   isAdminOrManager: boolean;
   isManager: boolean;
@@ -78,6 +79,7 @@ export class UserComponent implements OnInit {
   public onProfileImageChange(fileName: string, profileImage: File): void {
     this.fileName = fileName;
     this.profileImage = profileImage;
+    console.log(profileImage);
   }
 
   public saveNewUser(): void {
@@ -134,12 +136,29 @@ export class UserComponent implements OnInit {
 
   }
 
-  onUpdateCurrentUser(value: any): void {
-
+  public onUpdateCurrentUser(user: User): void {
+    this.refreshing = true;
+    this.currentUsername = this.authenticationService.getUserFromLocalCache().username;
+    const formData = this.userService.createUserFormData(this.currentUsername, this.user, this.profileImage);
+    this.subscriptions.push
+    (this.userService.updateUser(formData).subscribe(
+      (response: User) => {
+        this.authenticationService.addUserToLocalCache(response);
+        this.getUsers(false);
+        this.fileName = null;
+        this.profileImage = null;
+        this.sendNotification(NotificationType.SUCCESS, `${response.firstName} ${response.lastName} updated successfully`);
+      },
+      (errorResponse: HttpErrorResponse) => {
+        this.sendNotification(NotificationType.ERROR, errorResponse.error.message);
+        this.refreshing = true;
+        this.profileImage = null;
+      }
+    ));
   }
 
   updateProfileImage(): void {
-
+    this.clickButton('profile-image-input');
   }
 
   public onResetPassword(emailForm: NgForm): void {
@@ -160,10 +179,9 @@ export class UserComponent implements OnInit {
     );
   }
 
-  public onDeleteUser(userId: string): void {
-    console.log(userId);
+  public onDeleteUser(username: string): void {
     this.subscriptions.push(
-      this.userService.deleteUser(userId).subscribe(
+      this.userService.deleteUser(username).subscribe(
         (response: CustomHttpResponse) => {
           this.sendNotification(NotificationType.SUCCESS, response.message);
           this.getUsers(false);
@@ -183,8 +201,7 @@ export class UserComponent implements OnInit {
     this.clickButton('openUserEdit');
   }
 
-  onUpdateUser(): void {
-    console.log('update');
+  public onUpdateUser(): void {
     const formData = this.userService.createUserFormData(this.currentUsername, this.editUser, this.profileImage);
     this.subscriptions.push
     (this.userService.updateUser(formData).subscribe(
@@ -202,9 +219,40 @@ export class UserComponent implements OnInit {
     ));
   }
 
-  onUpdateProfileImage(): void {
+  public onUpdateProfileImage(): void {
+    const formData = new FormData();
+    formData.append('username', this.user.username);
+    formData.append('profileImage', this.profileImage);
+    this.subscriptions.push(
+      this.userService.updateProfileImage(formData).subscribe(
+      (event: HttpEvent<any>) => {
+        this.reportUploadProgress(event);
+      },
+      (errorResponse: HttpErrorResponse) => {
+        this.sendNotification(NotificationType.ERROR, errorResponse.error.message);
+        this.fileStatus.status = 'done';
+      }
+    ));
+  }
 
+  private reportUploadProgress(event: HttpEvent<any>): void {
+    switch (event.type) {
+      case HttpEventType.UploadProgress:
+        this.fileStatus.percentage = Math.round(100 * event.loaded / event.total);
+        this.fileStatus.status = 'progress';
+        break;
+      case HttpEventType.Response:
+        if (event.status === 200) {
+          this.user.profileImageUrl = `${event.body.profileImageUrl}?time=${new Date().getTime()}`;
+          this.sendNotification(NotificationType.SUCCESS, `${event.body.firstName}\'s Profile image updated successfully`);
+          this.fileStatus.status = 'done';
+          break;
+        } else {
+          this.sendNotification(NotificationType.ERROR, `Unable to upload image. PLease try again`);
+          break;
+        }
+      default:
+        `Finished all processes`;
+    }
   }
 }
-
-

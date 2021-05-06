@@ -20,7 +20,7 @@ import {FormsModule} from '@angular/forms';
     AppComponent,
     LoginComponent,
     RegisterComponent,
-    UserComponent
+    UserComponent,
   ],
   imports: [
     BrowserModule,
