@@ -1,3 +1,4 @@
+import {CustomHttpResponse} from '../model/custom-http-response';
 import {Component, OnInit} from '@angular/core';
 import {BehaviorSubject, Subscription} from 'rxjs';
 import {User} from '../model/user';
@@ -5,6 +6,10 @@ import {UserService} from '../service/user.service';
 import {NotificationService} from '../service/notification.service';
 import {NotificationType} from '../enum/notification-type.enum';
 import {HttpErrorResponse} from '@angular/common/http';
+import {NgForm} from '@angular/forms';
+
+import {Router} from '@angular/router';
+import {AuthenticationService} from '../service/authentication.service';
 
 @Component({
   selector: 'app-user',
@@ -13,17 +18,31 @@ import {HttpErrorResponse} from '@angular/common/http';
 })
 export class UserComponent implements OnInit {
   private titleSubject = new BehaviorSubject<string>('Users');
+  private subscriptions: Subscription[] = [];
   public titleAction$ = this.titleSubject.asObservable();
   public users: User [];
   public refreshing: boolean;
-  selectedUser: User;
-  private subscriptions: Subscription[] = [];
+  public selectedUser: User;
+  public fileName: string;
+  public profileImage: File;
+  private currentUsername: string;
+  user: User;
+  isAdmin: boolean;
+  fileStatus: any;
+  editUser = new User();
+  isAdminOrManager: boolean;
+  isManager: boolean;
 
-  constructor(private userService: UserService, private notificationService: NotificationService) {
+  constructor(private router: Router,
+              private userService: UserService,
+              private notificationService: NotificationService,
+              private authenticationService: AuthenticationService) {
   }
 
   ngOnInit(): void {
+    this.user = this.authenticationService.getUserFromLocalCache();
     this.getUsers(true);
+    console.log(this.user);
   }
 
   public changeTitle(title: string): void {
@@ -48,12 +67,55 @@ export class UserComponent implements OnInit {
         }
       )
     );
-
   }
+
 
   public onSelectUser(selectedUser: User): void {
     this.selectedUser = selectedUser;
-    document.getElementById('openUserInfo').click();
+    this.clickButton('openUserInfo');
+  }
+
+  public onProfileImageChange(fileName: string, profileImage: File): void {
+    this.fileName = fileName;
+    this.profileImage = profileImage;
+  }
+
+  public saveNewUser(): void {
+    this.clickButton('new-user-save');
+  }
+
+  public onAddNewUser(userForm: NgForm): void {
+    const formData = this.userService.createUserFormData(null, userForm.value, this.profileImage);
+    this.subscriptions.push(this.userService.addUser(formData).subscribe(
+      (response: User) => {
+        this.clickButton('new-user-close');
+        this.getUsers(false);
+        this.fileName = null;
+        this.profileImage = null;
+        userForm.reset();
+        this.sendNotification(NotificationType.SUCCESS, `${response.firstName} ${response.lastName} edited successfully`);
+      },
+      (errorResponse: HttpErrorResponse) => {
+        this.sendNotification(NotificationType.ERROR, errorResponse.error.message);
+        this.profileImage = null;
+      }
+    ));
+  }
+
+  public searchUsers(searchTerm: string): void {
+    const results: User[] = [];
+    for (const user of this.userService.getUsersFromLocalCache()) {
+      if (user.firstName.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
+        user.lastName.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
+        user.username.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
+        user.userId.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1) {
+        results.push(user);
+      }
+    }
+    this.users = results;
+    if (results.length === 0 || !searchTerm) {
+      this.users = this.userService.getUsersFromLocalCache();
+    }
   }
 
   private sendNotification(notificationType: NotificationType, message: string): void {
@@ -64,4 +126,85 @@ export class UserComponent implements OnInit {
     }
   }
 
+  private clickButton(buttonId: string): void {
+    document.getElementById(buttonId).click();
+  }
+
+  onLogOut(): void {
+
+  }
+
+  onUpdateCurrentUser(value: any): void {
+
+  }
+
+  updateProfileImage(): void {
+
+  }
+
+  public onResetPassword(emailForm: NgForm): void {
+    this.refreshing = true;
+    const emailAddress = emailForm.value['reset-password-email'];
+    this.subscriptions.push(
+      this.userService.resetPassword(emailAddress).subscribe(
+        (response: CustomHttpResponse) => {
+          this.sendNotification(NotificationType.SUCCESS, response.message);
+          this.refreshing = false;
+        },
+        (errorResponse: HttpErrorResponse) => {
+          this.sendNotification(NotificationType.WARNING, errorResponse.error.message);
+          this.refreshing = false;
+        },
+        () => emailForm.reset()
+      )
+    );
+  }
+
+  public onDeleteUser(userId: string): void {
+    console.log(userId);
+    this.subscriptions.push(
+      this.userService.deleteUser(userId).subscribe(
+        (response: CustomHttpResponse) => {
+          this.sendNotification(NotificationType.SUCCESS, response.message);
+          this.getUsers(false);
+        },
+        (errorResponse: HttpErrorResponse) => {
+          this.sendNotification(NotificationType.ERROR, errorResponse.error.message);
+          this.profileImage = null;
+        }
+      )
+    );
+
+  }
+
+  public onEditUser(editUser: User): void {
+    this.editUser = editUser;
+    this.currentUsername = editUser.username;
+    this.clickButton('openUserEdit');
+  }
+
+  onUpdateUser(): void {
+    console.log('update');
+    const formData = this.userService.createUserFormData(this.currentUsername, this.editUser, this.profileImage);
+    this.subscriptions.push
+    (this.userService.updateUser(formData).subscribe(
+      (response: User) => {
+        this.clickButton('closeEditUserModalButton');
+        this.getUsers(false);
+        this.fileName = null;
+        this.profileImage = null;
+        this.sendNotification(NotificationType.SUCCESS, `${response.firstName} ${response.lastName} updated successfully`);
+      },
+      (errorResponse: HttpErrorResponse) => {
+        this.sendNotification(NotificationType.ERROR, errorResponse.error.message);
+        this.profileImage = null;
+      }
+    ));
+  }
+
+  onUpdateProfileImage(): void {
+
+  }
 }
+
+
