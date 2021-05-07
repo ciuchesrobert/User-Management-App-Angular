@@ -1,5 +1,5 @@
 import {CustomHttpResponse} from '../model/custom-http-response';
-import {Component, OnInit} from '@angular/core';
+import {Component, OnInit, OnDestroy} from '@angular/core';
 import {BehaviorSubject, Subscription} from 'rxjs';
 import {User} from '../model/user';
 import {UserService} from '../service/user.service';
@@ -11,13 +11,16 @@ import {NgForm} from '@angular/forms';
 import {Router} from '@angular/router';
 import {AuthenticationService} from '../service/authentication.service';
 import {FileUploadStatus} from '../model/file-upload.status';
+import {Role} from '../enum/role.enum';
+import {SubSink} from 'subsink';
 
 @Component({
   selector: 'app-user',
   templateUrl: './user.component.html',
   styleUrls: ['./user.component.css']
 })
-export class UserComponent implements OnInit {
+export class UserComponent implements OnInit, OnDestroy {
+  private subs = new SubSink();
   private titleSubject = new BehaviorSubject<string>('Users');
   private subscriptions: Subscription[] = [];
   public titleAction$ = this.titleSubject.asObservable();
@@ -28,11 +31,8 @@ export class UserComponent implements OnInit {
   public profileImage: File;
   private currentUsername: string;
   public fileStatus = new FileUploadStatus();
-  user: User;
-  isAdmin: boolean;
-  editUser = new User();
-  isAdminOrManager: boolean;
-  isManager: boolean;
+  public user: User;
+  public editUser = new User();
 
   constructor(private router: Router,
               private userService: UserService,
@@ -52,7 +52,7 @@ export class UserComponent implements OnInit {
 
   public getUsers(showNotification: boolean): void {
     this.refreshing = true;
-    this.subscriptions.push(
+    this.subs.add(
       this.userService.getUsers().subscribe(
         (response: User[]) => {
           this.userService.addUsersToLocalCache(response);
@@ -70,7 +70,6 @@ export class UserComponent implements OnInit {
     );
   }
 
-
   public onSelectUser(selectedUser: User): void {
     this.selectedUser = selectedUser;
     this.clickButton('openUserInfo');
@@ -79,7 +78,6 @@ export class UserComponent implements OnInit {
   public onProfileImageChange(fileName: string, profileImage: File): void {
     this.fileName = fileName;
     this.profileImage = profileImage;
-    console.log(profileImage);
   }
 
   public saveNewUser(): void {
@@ -88,7 +86,7 @@ export class UserComponent implements OnInit {
 
   public onAddNewUser(userForm: NgForm): void {
     const formData = this.userService.createUserFormData(null, userForm.value, this.profileImage);
-    this.subscriptions.push(this.userService.addUser(formData).subscribe(
+    this.subs.add(this.userService.addUser(formData).subscribe(
       (response: User) => {
         this.clickButton('new-user-close');
         this.getUsers(false);
@@ -104,42 +102,17 @@ export class UserComponent implements OnInit {
     ));
   }
 
-  public searchUsers(searchTerm: string): void {
-    const results: User[] = [];
-    for (const user of this.userService.getUsersFromLocalCache()) {
-      if (user.firstName.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
-        user.lastName.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
-        user.username.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
-        user.userId.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1) {
-        results.push(user);
-      }
-    }
-    this.users = results;
-    if (results.length === 0 || !searchTerm) {
-      this.users = this.userService.getUsersFromLocalCache();
-    }
-  }
-
-  private sendNotification(notificationType: NotificationType, message: string): void {
-    if (message) {
-      this.notificationService.notify(notificationType, message);
-    } else {
-      this.notificationService.notify(notificationType, 'An error occurred. Please try again');
-    }
-  }
-
-  private clickButton(buttonId: string): void {
-    document.getElementById(buttonId).click();
-  }
-
   onLogOut(): void {
+    this.authenticationService.logout();
+    this.router.navigate(['/login']);
+    this.sendNotification(NotificationType.SUCCESS, `You've been successfully logged out`);
 
   }
 
   public onUpdateCurrentUser(user: User): void {
     this.refreshing = true;
     this.currentUsername = this.authenticationService.getUserFromLocalCache().username;
-    const formData = this.userService.createUserFormData(this.currentUsername, this.user, this.profileImage);
+    const formData = this.userService.createUserFormData(this.currentUsername, user, this.profileImage);
     this.subscriptions.push
     (this.userService.updateUser(formData).subscribe(
       (response: User) => {
@@ -192,7 +165,6 @@ export class UserComponent implements OnInit {
         }
       )
     );
-
   }
 
   public onEditUser(editUser: User): void {
@@ -235,6 +207,50 @@ export class UserComponent implements OnInit {
     ));
   }
 
+  public searchUsers(searchTerm: string): void {
+    const results: User[] = [];
+    for (const user of this.userService.getUsersFromLocalCache()) {
+      if (user.firstName.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
+        user.lastName.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
+        user.username.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1 ||
+        user.userId.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1) {
+        results.push(user);
+      }
+    }
+    this.users = results;
+    if (results.length === 0 || !searchTerm) {
+      this.users = this.userService.getUsersFromLocalCache();
+    }
+  }
+
+  public get isAdmin(): boolean {
+    return this.getUserRole() === Role.ADMIN || this.getUserRole() === Role.SUPER_ADMIN;
+  }
+
+  public get isManager(): boolean {
+    return this.isAdmin || this.getUserRole() === Role.MANAGER;
+  }
+
+  public get isAdminOrManager(): boolean {
+    return this.isAdmin || this.isManager;
+  }
+
+  private getUserRole(): string {
+    return this.authenticationService.getUserFromLocalCache().role;
+  }
+
+  private sendNotification(notificationType: NotificationType, message: string): void {
+    if (message) {
+      this.notificationService.notify(notificationType, message);
+    } else {
+      this.notificationService.notify(notificationType, 'An error occurred. Please try again');
+    }
+  }
+
+  private clickButton(buttonId: string): void {
+    document.getElementById(buttonId).click();
+  }
+
   private reportUploadProgress(event: HttpEvent<any>): void {
     switch (event.type) {
       case HttpEventType.UploadProgress:
@@ -252,7 +268,11 @@ export class UserComponent implements OnInit {
           break;
         }
       default:
-        `Finished all processes`;
+        `Finished upload: ${event.type}.`;
     }
+  }
+
+  ngOnDestroy(): void {
+    this.subs.unsubscribe();
   }
 }

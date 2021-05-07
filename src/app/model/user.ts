@@ -14,10 +14,14 @@ export class User {
   public authorities: [];
 
   constructor() {
+    this.userId = '';
     this.firstName = '';
     this.lastName = '';
     this.username = '';
-    this.email = '';
+    this.lastLoginDate = null;
+    this.lastLoginDateDisplay = null;
+    this.joinDate = null;
+    this.profileImageUrl = '';
     this.active = false;
     this.notLocked = false;
     this.role = '';
